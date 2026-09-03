@@ -67,9 +67,9 @@ def process_contact(first_name, last_name, email):
     pyautogui.press("down", presses=16, interval=0.05)
     pyautogui.press("enter")
     pyautogui.press("tab", presses=2)
-    pyautogui.write(first_name, interval=0.05)
-    pyautogui.press("tab")
     pyautogui.write(last_name, interval=0.05)
+    pyautogui.press("tab")
+    pyautogui.write(first_name, interval=0.05)
     pyautogui.press("tab", presses=10)
     pyautogui.press("enter")
     time.sleep(10)
@@ -107,15 +107,16 @@ def process_contact(first_name, last_name, email):
     last_name_x, _ = pyautogui.center(last_name_label)
 
     # Find the vertical center of the Contact row.
-    contact_status = pyautogui.locateOnScreen(
+    contact_statuses = list(pyautogui.locateAllOnScreen(
         "contact_status.png",
         confidence=0.75,
         grayscale=True,
-    )
-    if contact_status is None:
+    ))
+    if len(contact_statuses) != 1:
         raise pyautogui.ImageNotFoundException(
-            "Contact row was not found."
+            f"Expected exactly one Contact row, found {len(contact_statuses)}."
         )
+    contact_status = contact_statuses[0]
     _, contact_y = pyautogui.center(contact_status)
 
     # Same column as Last Name, same row as Contact.
@@ -140,12 +141,18 @@ def process_contact(first_name, last_name, email):
     pyautogui.press("enter")
     time.sleep(5)
 
-    # Retain the final screen check from gui.py.
-    pyautogui.locateOnScreen(
-        "last_name_label.png",
+    # Return to the main search page for the next Excel row.
+    final_check = pyautogui.locateOnScreen(
+        "main.png",
         confidence=0.75,
         grayscale=True,
     )
+    if final_check is None:
+        raise pyautogui.ImageNotFoundException(
+            "Main button was not found."
+        )
+    main_x, main_y = pyautogui.center(final_check)
+    pyautogui.click(main_x, main_y)
 
 
 def main():
