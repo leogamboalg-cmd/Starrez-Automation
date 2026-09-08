@@ -523,8 +523,27 @@ class AutomationLauncher(tk.Tk):
             wraplength=440, justify="left",
         ).pack(anchor="w", pady=(0, 12))
         tk.Label(
-            prompt, text=f"{reason}\n\n{STARREZ_URL}\n\n"
-                         "You can use your laptop screen or either monitor.\n\n"
+            prompt, text=reason,
+            bg=WARNING_SOFT, fg=PRIMARY_TEXT, font=("Segoe UI", 11),
+            wraplength=440, justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        copy_note = tk.Label(
+            prompt, text="Click the link to copy it.",
+            bg=WARNING_SOFT, fg=SECONDARY_TEXT, font=("Segoe UI", 10),
+            wraplength=440, justify="left",
+        )
+        tk.Button(
+            prompt, text=STARREZ_URL,
+            command=lambda: self._copy_website_link(copy_note),
+            bg=WARNING_SOFT, fg=ACCENT,
+            activebackground=WARNING_SOFT, activeforeground=ACCENT_HOVER,
+            font=("Segoe UI", 11, "underline"), cursor="hand2",
+            relief="flat", bd=0, padx=0, pady=4,
+            wraplength=440, justify="left", anchor="w",
+        ).pack(anchor="w", fill="x")
+        copy_note.pack(anchor="w", pady=(0, 16))
+        tk.Label(
+            prompt, text="You can use your laptop screen or either monitor.\n\n"
                          "When ready, click the button below. You will have 5 seconds "
                          "to switch back to StarRez before we check again.",
             bg=WARNING_SOFT, fg=PRIMARY_TEXT, font=("Segoe UI", 11),
@@ -534,6 +553,15 @@ class AutomationLauncher(tk.Tk):
         self._button(prompt, "Cancel run", self._cancel_website_wait, subtle=True).pack(
             fill="x", pady=(10, 0))
         prompt.protocol("WM_DELETE_WINDOW", self._cancel_website_wait)
+
+    def _copy_website_link(self, feedback):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(STARREZ_URL)
+        except tk.TclError:
+            feedback.config(text="Couldn't copy the link. Please try clicking it again.", fg=ERROR)
+            return
+        feedback.config(text="Copied! Paste it into your browser's address bar with Ctrl+V.", fg=SUCCESS)
 
     def _dismiss_website_prompt(self):
         if self.website_prompt is not None:
