@@ -2,15 +2,15 @@ from pathlib import Path
 import json
 import queue
 import threading
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import keyboard
 import pyautogui
 from openpyxl import load_workbook
+from PIL import Image, ImageTk
 
 from guiFinished import get_column_numbers, process_contact
+from starrez_screen import STARREZ_URL, check_starrez_ready
 
 
 APP_BACKGROUND = "#F4F7FB"
@@ -47,6 +47,10 @@ class AutomationLauncher(tk.Tk):
         self.progress_text = tk.StringVar(value="0 / 0")
         self.event_queue = queue.Queue()
         self.running = False
+        self.website_retry = threading.Event()
+        self.cancel_run = threading.Event()
+        self.website_prompt = None
+        self.protocol("WM_DELETE_WINDOW", self._close_app)
 
         self._configure_styles()
         self._build_interface()
@@ -93,6 +97,8 @@ class AutomationLauncher(tk.Tk):
 
     def _build_interface(self):
         page = tk.Frame(self, bg=APP_BACKGROUND)
+        self.main_page = page
+        self.example_page = None
         page.pack(fill="both", expand=True)
         page.grid_rowconfigure(0, weight=1)
         page.grid_columnconfigure(0, weight=1)
@@ -149,22 +155,45 @@ class AutomationLauncher(tk.Tk):
         ).pack(anchor="w")
         tk.Label(
             title_box,
-            text="A guided workspace for processing your contact list",
+            text="Add contacts to StarRez from an Excel file",
             bg=APP_BACKGROUND,
             fg=SECONDARY_TEXT,
             font=("Segoe UI", 10),
         ).pack(anchor="w")
 
+        self.banner_labels = []
+        for text, background, foreground in (
+            ("Before you start: log in to StarRez and open the Main page.",
+             ACCENT_SOFT, ACCENT),
+            ("Close your selected Excel file before starting. Keep it closed while the script runs.",
+             WARNING_SOFT, WARNING),
+            ("Once the script starts, do not touch the mouse or keyboard until the entire list finishes.",
+             WARNING_SOFT, WARNING),
+        ):
+            banner = tk.Label(
+                outer, text=text, bg=background, fg=foreground,
+                font=("Segoe UI", 17, "bold"), anchor="w", justify="left",
+                padx=18, pady=16, wraplength=720,
+            )
+            banner.pack(fill="x", pady=(0, 14))
+            self.banner_labels.append(banner)
+
         file_card = self._card(outer)
         file_card.pack(fill="x", pady=(0, 14))
-        self._section_label(file_card, "Workbook").pack(anchor="w")
+        self._section_label(file_card, "1. Choose your Excel file").pack(anchor="w")
         tk.Label(
             file_card,
-            text="Select the Excel file containing First, Last, and Email columns.",
+            text="Use column headings First, Last, and Email in the first row.",
             bg=CARD_BACKGROUND,
             fg=SECONDARY_TEXT,
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(4, 12))
+
+        self.example_button = self._button(
+            file_card, "Click here to view an example Excel sheet",
+            self._open_excel_example, subtle=True,
+        )
+        self.example_button.pack(anchor="w")
 
         file_row = tk.Frame(file_card, bg=CARD_BACKGROUND)
         file_row.pack(fill="x", pady=(10, 0))
@@ -183,7 +212,7 @@ class AutomationLauncher(tk.Tk):
         )
         self.file_entry.pack(side="left", fill="x", expand=True, ipady=10)
         self.browse_button = self._button(
-            file_row, "Browse", self._choose_excel, subtle=True
+            file_row, "Choose file", self._choose_excel, subtle=True
         )
         self.browse_button.pack(side="left", padx=(10, 0), ipadx=8, ipady=5)
 
@@ -215,7 +244,7 @@ class AutomationLauncher(tk.Tk):
 
         self.detail_label = tk.Label(
             status_card,
-            text="Choose an Excel file, then start the queue.",
+            text="Choose your file, then click Start contacts below.",
             bg=CARD_BACKGROUND,
             fg=SECONDARY_TEXT,
             font=("Segoe UI", 10),
@@ -247,14 +276,18 @@ class AutomationLauncher(tk.Tk):
         hint.pack(fill="x", pady=(24, 0))
         tk.Label(
             hint,
-            text="RIGHT SHIFT",
+            text="2. Start your contacts",
             bg="#F7F9FC",
             fg=ACCENT,
             font=("Segoe UI Semibold", 9),
         ).pack(anchor="w")
         self.hint_text = tk.Label(
             hint,
-            text="Runs the displayed contact  •  Move the pointer top-left for emergency stop",
+            text="Close your Excel file, then click Start contacts. "
+                 "You have 5 seconds to switch to the Main page in StarRez. "
+                 "The app will check that StarRez is ready on your laptop or connected monitor. "
+                 "All contacts will run automatically. Leave the mouse and keyboard alone until the list finishes.\n"
+                 "To stop in an emergency, move the mouse to the top-left corner of the screen.",
             bg="#F7F9FC",
             fg=SECONDARY_TEXT,
             font=("Segoe UI", 9),
@@ -267,7 +300,7 @@ class AutomationLauncher(tk.Tk):
         controls.pack(fill="x")
         self.saved_note = tk.Label(
             controls,
-            text="Your selected workbook is remembered automatically.",
+            text="We'll remember your Excel file for next time.",
             bg=APP_BACKGROUND,
             fg=SECONDARY_TEXT,
             font=("Segoe UI", 9),
@@ -276,7 +309,7 @@ class AutomationLauncher(tk.Tk):
         )
         self.saved_note.pack(fill="x", pady=(0, 10))
         self.start_button = self._button(
-            controls, "Start Contact Queue", self._start
+            controls, "Start contacts", self._start
         )
         self.start_button.pack(fill="x", ipady=7)
 
@@ -322,9 +355,64 @@ class AutomationLauncher(tk.Tk):
             pady=8,
         )
 
+    def _open_excel_example(self):
+        if self.running or self.example_page is not None:
+            return
+        image_path = Path(__file__).with_name("excel.png")
+        self.example_source = None
+        try:
+            with Image.open(image_path) as source:
+                self.example_source = source.convert("RGBA")
+        except OSError:
+            pass
+
+        self.main_page.pack_forget()
+        self.example_page = tk.Frame(self, bg=APP_BACKGROUND, padx=24, pady=24)
+        self.example_page.pack(fill="both", expand=True)
+        self._button(
+            self.example_page, "Back to main page", self._close_excel_example,
+            subtle=True,
+        ).pack(anchor="w", pady=(0, 16))
+        tk.Label(
+            self.example_page, text="Example Excel sheet", bg=APP_BACKGROUND,
+            fg=PRIMARY_TEXT, font=("Segoe UI", 20, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+        tk.Label(
+            self.example_page,
+            text="Use First, Last, and Email as your column headings.",
+            bg=APP_BACKGROUND, fg=SECONDARY_TEXT, font=("Segoe UI", 10),
+            wraplength=440, justify="left",
+        ).pack(anchor="w", pady=(0, 16))
+        self.example_display = tk.Label(
+            self.example_page, bg=CARD_BACKGROUND, fg=SECONDARY_TEXT,
+            font=("Segoe UI", 12), wraplength=400,
+        )
+        self.example_display.pack(fill="both", expand=True)
+        if self.example_source is None:
+            self.example_display.config(
+                text="The example image isn't available yet.\n\n"
+                     "Add an image named excel.png to the app's folder.",
+            )
+        else:
+            self.example_display.bind("<Configure>", self._resize_excel_example)
+
+    def _resize_excel_example(self, event):
+        preview = self.example_source.copy()
+        preview.thumbnail((max(1, event.width - 24), max(1, event.height - 24)),
+                          Image.Resampling.LANCZOS)
+        self.example_photo = ImageTk.PhotoImage(preview, master=self)
+        self.example_display.config(image=self.example_photo)
+
+    def _close_excel_example(self):
+        self.example_page.destroy()
+        self.example_page = None
+        self.example_source = None
+        self.example_photo = None
+        self.main_page.pack(fill="both", expand=True)
+
     def _choose_excel(self):
         selected = filedialog.askopenfilename(
-            title="Select contact workbook",
+            title="Choose your Excel contact file",
             initialdir=str(Path(self.excel_path.get()).parent),
             filetypes=[("Excel workbooks", "*.xlsx"), ("All files", "*.*")],
         )
@@ -332,7 +420,8 @@ class AutomationLauncher(tk.Tk):
             self.excel_path.set(selected)
             self._save_excel_path()
             self.status_text.set("Ready")
-            self.detail_label.config(text="Workbook selected. Start when StarRez is open.")
+            self.detail_label.config(
+                text="File selected. Log in to StarRez and open Main, then click Start contacts.")
 
     def _on_resize(self, event):
         if event.widget is not self:
@@ -343,6 +432,8 @@ class AutomationLauncher(tk.Tk):
         self.detail_label.config(wraplength=text_width)
         self.hint_text.config(wraplength=text_width)
         self.saved_note.config(wraplength=text_width)
+        for banner in self.banner_labels:
+            banner.config(wraplength=text_width)
 
     def _update_scroll_region(self, _event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -351,29 +442,38 @@ class AutomationLauncher(tk.Tk):
         self.canvas.itemconfigure(self.canvas_window, width=event.width)
 
     def _scroll_page(self, event):
+        if self.example_page is not None:
+            return
         if self.canvas.winfo_height() < self.outer.winfo_reqheight():
             self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _start(self):
+        if self.running:
+            return
         workbook_path = Path(self.excel_path.get().strip())
         if not workbook_path.is_file():
-            messagebox.showerror("File not found", "Select an existing Excel workbook.")
+            messagebox.showerror(
+                "File not found", "Click Choose file and select your Excel file.")
             return
 
         try:
-            workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+            workbook = load_workbook(
+                workbook_path, read_only=True, data_only=True)
             try:
                 get_column_numbers(workbook.active)
             finally:
                 workbook.close()
         except (OSError, ValueError) as error:
-            messagebox.showerror("Cannot use workbook", str(error))
+            messagebox.showerror("Cannot open this Excel file", str(error))
             return
 
         self.running = True
+        self.cancel_run.clear()
+        self.website_retry.clear()
         self._save_excel_path()
         self.start_button.config(state="disabled")
         self.browse_button.config(state="disabled")
+        self.example_button.config(state="disabled")
         self.file_entry.config(state="disabled")
         self.status_text.set("Loading")
         self.status_badge.config(fg=ACCENT, bg=ACCENT_SOFT)
@@ -385,10 +485,81 @@ class AutomationLauncher(tk.Tk):
         )
         worker.start()
 
+    def _wait_for_starrez(self, countdown=False):
+        """Pause the worker, keeping Tk responsive, until readiness is verified."""
+        while not self.cancel_run.is_set():
+            if countdown:
+                for seconds in range(5, 0, -1):
+                    self.event_queue.put(("countdown", seconds))
+                    if self.cancel_run.wait(1):
+                        return None
+            self.event_queue.put(("checking_website",))
+            region, reason = check_starrez_ready()
+            if self.cancel_run.is_set():
+                return None
+            if region is not None:
+                return region
+            self.website_retry.clear()
+            self.event_queue.put(("website_required", reason))
+            self.website_retry.wait()
+            countdown = True
+        return None
+
+    def _show_website_prompt(self, reason):
+        self.status_text.set("Paused: open StarRez")
+        self.status_badge.config(fg=WARNING, bg=WARNING_SOFT)
+        self.detail_label.config(text=reason)
+        self.deiconify()
+        self.lift()
+        prompt = tk.Toplevel(self)
+        self.website_prompt = prompt
+        prompt.title("Open StarRez to continue")
+        prompt.configure(bg=WARNING_SOFT, padx=24, pady=24)
+        prompt.resizable(False, False)
+        prompt.transient(self)
+        tk.Label(
+            prompt, text="Please open StarRez before continuing",
+            bg=WARNING_SOFT, fg=WARNING, font=("Segoe UI", 16, "bold"),
+            wraplength=440, justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        tk.Label(
+            prompt, text=f"{reason}\n\n{STARREZ_URL}\n\n"
+                         "You can use your laptop screen or either monitor.\n\n"
+                         "When ready, click the button below. You will have 5 seconds "
+                         "to switch back to StarRez before we check again.",
+            bg=WARNING_SOFT, fg=PRIMARY_TEXT, font=("Segoe UI", 11),
+            wraplength=440, justify="left",
+        ).pack(anchor="w", pady=(0, 20))
+        self._button(prompt, "I am on the website now", self._retry_website).pack(fill="x")
+        self._button(prompt, "Cancel run", self._cancel_website_wait, subtle=True).pack(
+            fill="x", pady=(10, 0))
+        prompt.protocol("WM_DELETE_WINDOW", self._cancel_website_wait)
+
+    def _dismiss_website_prompt(self):
+        if self.website_prompt is not None:
+            self.website_prompt.destroy()
+            self.website_prompt = None
+
+    def _retry_website(self):
+        self._dismiss_website_prompt()
+        self.status_text.set("Getting ready")
+        self.website_retry.set()
+
+    def _cancel_website_wait(self):
+        self._dismiss_website_prompt()
+        self.cancel_run.set()
+        self.website_retry.set()
+
+    def _close_app(self):
+        self.cancel_run.set()
+        self.website_retry.set()
+        self.destroy()
+
     def _run_contacts(self, workbook_path):
         workbook = None
         try:
-            workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+            workbook = load_workbook(
+                workbook_path, read_only=True, data_only=True)
             sheet = workbook.active
             columns = get_column_numbers(sheet)
             contacts = []
@@ -396,13 +567,16 @@ class AutomationLauncher(tk.Tk):
             row_number = 2
             while row_number <= sheet.max_row:
                 first_name = str(
-                    sheet.cell(row=row_number, column=columns["First"]).value or ""
+                    sheet.cell(row=row_number,
+                               column=columns["First"]).value or ""
                 ).strip()
                 last_name = str(
-                    sheet.cell(row=row_number, column=columns["Last"]).value or ""
+                    sheet.cell(row=row_number,
+                               column=columns["Last"]).value or ""
                 ).strip()
                 email = str(
-                    sheet.cell(row=row_number, column=columns["Email"]).value or ""
+                    sheet.cell(row=row_number,
+                               column=columns["Email"]).value or ""
                 ).strip()
 
                 if first_name and last_name and email:
@@ -415,19 +589,24 @@ class AutomationLauncher(tk.Tk):
             for position, (row_number, first_name, last_name, email) in enumerate(
                 contacts, start=1
             ):
+                region = self._wait_for_starrez(countdown=(position == 1))
+                if region is None:
+                    self.event_queue.put(("stopped", "Run cancelled. No more contacts will be added."))
+                    return
                 self.event_queue.put(
-                    ("waiting", position, total, row_number, first_name, last_name, email)
+                    ("running", position, total, row_number,
+                     first_name, last_name, email)
                 )
-                keyboard.wait("right shift")
-                self.event_queue.put(("running", position, total))
-                time.sleep(1)
 
                 try:
-                    process_contact(first_name, last_name, email)
+                    process_contact(first_name, last_name, email, screen_region=region)
                     self.event_queue.put(("finished", position, total))
                 except pyautogui.ImageNotFoundException as error:
-                    error_text = str(error) or "A required screen image was not found."
-                    self.event_queue.put(("failed", position, total, error_text))
+                    error_text = str(
+                        error) or "A required screen image was not found."
+                    self.event_queue.put(
+                        ("failed", position, total, error_text))
+                    return
 
             self.event_queue.put(("complete", total))
         except pyautogui.FailSafeException:
@@ -448,18 +627,23 @@ class AutomationLauncher(tk.Tk):
                     total = event[1]
                     self.progress.config(maximum=max(total, 1), value=0)
                     self.progress_text.set(f"0 / {total}")
-                elif kind == "waiting":
+                elif kind == "countdown":
+                    self.status_text.set(f"Starting in {event[1]} seconds")
+                    self.status_badge.config(fg=WARNING, bg=WARNING_SOFT)
+                    self.detail_label.config(
+                        text="Switch to the Main page in StarRez now. Then leave the mouse and keyboard alone.")
+                elif kind == "checking_website":
+                    self.status_text.set("Checking StarRez")
+                    self.detail_label.config(text="Keep StarRez in front while we check that the Main page is ready.")
+                elif kind == "website_required":
+                    self._show_website_prompt(event[1])
+                elif kind == "running":
                     _, position, total, row, first, last, email = event
                     self.current_contact.set(f"{first} {last}")
-                    self.status_text.set("Waiting for Right Shift")
-                    self.status_badge.config(fg=WARNING, bg=WARNING_SOFT)
-                    self.detail_label.config(text=f"Excel row {row}  •  {email}")
-                    self.progress_text.set(f"{position - 1} / {total}")
-                elif kind == "running":
-                    _, position, total = event
                     self.status_text.set("Running")
                     self.status_badge.config(fg=ACCENT, bg=ACCENT_SOFT)
-                    self.detail_label.config(text="Automation is controlling StarRez...")
+                    self.detail_label.config(
+                        text="Adding this contact to StarRez. Do not touch the mouse or keyboard.")
                     self.progress_text.set(f"{position - 1} / {total}")
                 elif kind == "finished":
                     _, position, total = event
@@ -471,18 +655,23 @@ class AutomationLauncher(tk.Tk):
                     _, position, total, error_text = event
                     self.progress.config(value=position)
                     self.progress_text.set(f"{position} / {total}")
-                    self.status_text.set("Contact failed")
+                    self.status_text.set("Stopped: contact could not finish")
                     self.status_badge.config(fg=ERROR, bg=ERROR_SOFT)
-                    self.detail_label.config(text=error_text)
+                    self.detail_label.config(
+                        text=f"{error_text}\nCheck this contact in StarRez before starting again. "
+                             "Remove completed contacts from your Excel list to avoid repeating them.")
+                    self._unlock_controls()
                 elif kind == "complete":
                     total = event[1]
-                    self.current_contact.set("Queue complete")
+                    self.current_contact.set("Contact list finished")
                     self.status_text.set("Finished")
                     self.status_badge.config(fg=SUCCESS, bg=SUCCESS_SOFT)
-                    self.detail_label.config(text=f"All {total} valid contacts were checked.")
+                    self.detail_label.config(
+                        text=f"All {total} valid contacts were checked.")
                     self._unlock_controls()
                 elif kind in ("stopped", "fatal"):
-                    self.status_text.set("Stopped" if kind == "stopped" else "Error")
+                    self.status_text.set(
+                        "Stopped" if kind == "stopped" else "Error")
                     self.status_badge.config(fg=ERROR, bg=ERROR_SOFT)
                     self.detail_label.config(text=event[1])
                     self._unlock_controls()
@@ -495,6 +684,7 @@ class AutomationLauncher(tk.Tk):
         self.running = False
         self.start_button.config(state="normal")
         self.browse_button.config(state="normal")
+        self.example_button.config(state="normal")
         self.file_entry.config(state="normal")
 
 
