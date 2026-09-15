@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 from PIL import Image, ImageTk
 
 from guiFinished import get_column_numbers, process_contact
-from starrez_screen import STARREZ_URL, check_starrez_ready
+from starrez_screen import STARREZ_URL, check_starrez_ready, locate_control
 
 
 APP_BACKGROUND = "#F4F7FB"
@@ -485,7 +485,7 @@ class AutomationLauncher(tk.Tk):
         )
         worker.start()
 
-    def _wait_for_starrez(self, countdown=False):
+    def _wait_for_starrez(self, countdown=False, require_add_button=False):
         """Pause the worker, keeping Tk responsive, until readiness is verified."""
         while not self.cancel_run.is_set():
             if countdown:
@@ -495,6 +495,12 @@ class AutomationLauncher(tk.Tk):
                         return None
             self.event_queue.put(("checking_website",))
             region, reason = check_starrez_ready()
+            if region is not None and require_add_button:
+                try:
+                    locate_control("green_plus.png", region=region, confidence=0.80)
+                except pyautogui.ImageNotFoundException:
+                    region = None
+                    reason = "Return to the Main directory page with the green Add button visible."
             if self.cancel_run.is_set():
                 return None
             if region is not None:
@@ -505,20 +511,21 @@ class AutomationLauncher(tk.Tk):
             countdown = True
         return None
 
-    def _show_website_prompt(self, reason):
-        self.status_text.set("Paused: open StarRez")
+    def _show_website_prompt(self, reason, contact_review=False):
+        self.status_text.set("Paused: review contact" if contact_review else "Paused: open StarRez")
         self.status_badge.config(fg=WARNING, bg=WARNING_SOFT)
         self.detail_label.config(text=reason)
         self.deiconify()
         self.lift()
         prompt = tk.Toplevel(self)
         self.website_prompt = prompt
-        prompt.title("Open StarRez to continue")
+        prompt.title("Contact error" if contact_review else "Open StarRez to continue")
         prompt.configure(bg=WARNING_SOFT, padx=24, pady=24)
         prompt.resizable(False, False)
         prompt.transient(self)
         tk.Label(
-            prompt, text="Please open StarRez before continuing",
+            prompt, text=("This contact could not finish" if contact_review
+                          else "Please open StarRez before continuing"),
             bg=WARNING_SOFT, fg=WARNING, font=("Segoe UI", 16, "bold"),
             wraplength=440, justify="left",
         ).pack(anchor="w", pady=(0, 12))
@@ -549,8 +556,10 @@ class AutomationLauncher(tk.Tk):
             bg=WARNING_SOFT, fg=PRIMARY_TEXT, font=("Segoe UI", 11),
             wraplength=440, justify="left",
         ).pack(anchor="w", pady=(0, 20))
-        self._button(prompt, "I am on the website now", self._retry_website).pack(fill="x")
-        self._button(prompt, "Cancel run", self._cancel_website_wait, subtle=True).pack(
+        self._button(prompt, "Continue" if contact_review else
+                     "I am on the website now", self._retry_website).pack(fill="x")
+        self._button(prompt, "End run" if contact_review else "Cancel run",
+                     self._cancel_website_wait, subtle=True).pack(
             fill="x", pady=(10, 0))
         prompt.protocol("WM_DELETE_WINDOW", self._cancel_website_wait)
 
@@ -632,9 +641,14 @@ class AutomationLauncher(tk.Tk):
                 except pyautogui.ImageNotFoundException as error:
                     error_text = str(
                         error) or "A required screen image was not found."
+                    self.website_retry.clear()
                     self.event_queue.put(
                         ("failed", position, total, error_text))
-                    return
+                    self.website_retry.wait()
+                    if self._wait_for_starrez(countdown=True, require_add_button=True) is None:
+                        self.event_queue.put(("stopped", "Run cancelled. No more contacts will be added."))
+                        return
+                    self.event_queue.put(("skipped", position, total))
 
             self.event_queue.put(("complete", total))
         except pyautogui.FailSafeException:
@@ -681,14 +695,15 @@ class AutomationLauncher(tk.Tk):
                     self.status_badge.config(fg=SUCCESS, bg=SUCCESS_SOFT)
                 elif kind == "failed":
                     _, position, total, error_text = event
+                    self._show_website_prompt(
+                        f"{error_text}\n\nReview {self.current_contact.get()} in StarRez and "
+                        "finish or correct it manually if needed. Then return to the Main directory page. "
+                        "Continue skips this contact and keeps your place in the list.",
+                        contact_review=True)
+                elif kind == "skipped":
+                    _, position, total = event
                     self.progress.config(value=position)
                     self.progress_text.set(f"{position} / {total}")
-                    self.status_text.set("Stopped: contact could not finish")
-                    self.status_badge.config(fg=ERROR, bg=ERROR_SOFT)
-                    self.detail_label.config(
-                        text=f"{error_text}\nCheck this contact in StarRez before starting again. "
-                             "Remove completed contacts from your Excel list to avoid repeating them.")
-                    self._unlock_controls()
                 elif kind == "complete":
                     total = event[1]
                     self.current_contact.set("Contact list finished")
