@@ -3,15 +3,18 @@ from pathlib import Path
 
 project_dir = Path(SPECPATH).parent
 asset_names = (
+    "all.png",
     "app_logo.ico",
     "cancel_button.png",
     "contact_status.png",
+    "email.png",
     "excel.png",
     "green_plus.png",
     "last_name_area.png",
     "last_name_label.png",
     "link.png",
     "main.png",
+    "room.png",
     "whiteLink.png",
 )
 
@@ -25,7 +28,11 @@ a = Analysis(
     pathex=[str(project_dir / "src")],
     binaries=[],
     datas=added_data,
-    hiddenimports=[],
+    hiddenimports=[
+        "winrt.windows.graphics.imaging",
+        "winrt.windows.media.ocr",
+        "winrt.windows.storage.streams",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

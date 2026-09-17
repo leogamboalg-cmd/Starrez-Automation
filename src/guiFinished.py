@@ -2,20 +2,13 @@ import time
 
 import numpy as np
 import pyautogui
-from PIL import Image
+from contact_ocr import choose_exact_blank_row
 from starrez_screen import (
-    ASSET_DIR, capture_desktop, locate_control, locate_controls,
+    capture_desktop, locate_control, locate_controls,
     physical_screen_coordinates,
 )
 
 
-# Email cell INTERIOR, measured from the LEFT edge of last_name_label.png.
-# These are starting layout values: calibrate them to your StarRez columns.
-# Leave cell borders/padding outside this range. Values use the saved label's
-# pixel scale; the detected label size scales them for other display settings.
-EMAIL_COLUMN_LEFT_OFFSET = 250
-EMAIL_COLUMN_RIGHT_OFFSET = 550
-EMAIL_CELL_HALF_HEIGHT = 10
 EMAIL_BACKGROUND_CONTRAST = 30  # RGB channel difference from the cell background.
 EMAIL_MIN_VISIBLE_PIXELS = 3    # Ignore at most two isolated noisy pixels.
 
@@ -34,9 +27,43 @@ def email_cell_contains_text(cell_image):
     return np.count_nonzero(contrast >= EMAIL_BACKGROUND_CONTRAST) >= EMAIL_MIN_VISIBLE_PIXELS
 
 
-def select_blank_contact_row(last_name_label, screen_region=None):
-    """Return the unique Contact row with a visually blank Email cell."""
+def select_blank_contact_row(last_name_label, screen_region=None,
+                             first_name=None, last_name=None):
+    """Return the sole blank Contact row, using OCR if several are blank."""
     pyautogui.failSafeCheck()
+    email_matches = locate_controls(
+        "email.png", region=screen_region, confidence=0.80, grayscale=True,
+    )
+    room_matches = locate_controls(
+        "room.png", region=screen_region, confidence=0.80, grayscale=True,
+    )
+    email_candidates = [
+        box for box in email_matches
+        if box.left > last_name_label.left + last_name_label.width
+        and abs(box.top + box.height // 2
+                - (last_name_label.top + last_name_label.height // 2))
+        <= max(box.height, last_name_label.height)
+    ]
+    if not email_candidates:
+        raise pyautogui.ImageNotFoundException("Email column heading was not found.")
+    email_heading = min(email_candidates, key=lambda box: box.left)
+    room_candidates = [
+        box for box in room_matches
+        if box.left > email_heading.left + email_heading.width // 2
+        and abs(box.top + box.height // 2
+                - (email_heading.top + email_heading.height // 2))
+        <= max(box.height, email_heading.height)
+    ]
+    if not room_candidates:
+        raise pyautogui.ImageNotFoundException("Room column heading was not found.")
+    room_heading = min(room_candidates, key=lambda box: box.left)
+    left = email_heading.left
+    right = min(email_heading.left + email_heading.width, room_heading.left)
+    if right <= left + email_heading.width // 2:
+        raise pyautogui.ImageNotFoundException(
+            "Email and Room headings overlap; the Email column cannot be inspected."
+        )
+
     contact_statuses = list(locate_controls(
         "contact_status.png", region=screen_region,
         confidence=0.75, grayscale=True,
@@ -45,8 +72,11 @@ def select_blank_contact_row(last_name_label, screen_region=None):
     # those as one row, while preserving distinct rows in top-to-bottom order.
     rows = []
     for status in sorted(contact_statuses, key=lambda box: (box.top, box.left)):
-        if status.top <= last_name_label.top + last_name_label.height:
+        if status.top <= max(email_heading.top + email_heading.height,
+                             room_heading.top + room_heading.height):
             continue  # Exclude matches above the results table.
+        if status.left <= room_heading.left:
+            continue
         center_y = status.top + status.height // 2
         if any(abs(center_y - (row.top + row.height // 2))
                <= max(2, min(status.height, row.height) // 2) for row in rows):
@@ -56,24 +86,13 @@ def select_blank_contact_row(last_name_label, screen_region=None):
     if not rows:
         raise pyautogui.ImageNotFoundException("No Contact row with a blank email was found.")
 
-    with Image.open(ASSET_DIR / "last_name_label.png") as reference:
-        scale_x = last_name_label.width / reference.width
-        scale_y = last_name_label.height / reference.height
-    left = round(last_name_label.left + EMAIL_COLUMN_LEFT_OFFSET * scale_x)
-    right = round(last_name_label.left + EMAIL_COLUMN_RIGHT_OFFSET * scale_x)
-    half_height = max(2, round(EMAIL_CELL_HALF_HEIGHT * scale_y))
-    if not 0 < EMAIL_COLUMN_LEFT_OFFSET < EMAIL_COLUMN_RIGHT_OFFSET:
-        raise pyautogui.ImageNotFoundException("Check the Email column offset constants before continuing.")
-    if right >= min(row.left for row in rows):
-        raise pyautogui.ImageNotFoundException(
-            "The Email inspection area overlaps Entry Status. Check the Email column offset constants.")
-
     screenshot, origin_x, origin_y = capture_desktop()
     blank_rows = []
+    blank_details = []
     for number, status in enumerate(rows, start=1):
         pyautogui.failSafeCheck()
         row_y = status.top + status.height // 2
-        top, bottom = row_y - half_height, row_y + half_height
+        top, bottom = row_y - status.height // 2, row_y + status.height // 2
         # Never let Pillow pad an off-screen crop with black pixels: that could
         # turn an unseen cell into an apparently blank one.
         visible = (origin_x <= left < right <= origin_x + screenshot.width
@@ -84,11 +103,11 @@ def select_blank_contact_row(last_name_label, screen_region=None):
         if not visible:
             raise pyautogui.ImageNotFoundException(
                 f"The Email cell for Contact row {number} is not fully visible. "
-                "Check the Email column offsets and browser window.")
+                "Check the browser window.")
         if any(other is not status and top <= other.top + other.height // 2 < bottom
                for other in rows):
             raise pyautogui.ImageNotFoundException(
-                "The Email inspection area spans multiple rows. Reduce EMAIL_CELL_HALF_HEIGHT.")
+                "The Email inspection area spans multiple rows.")
         cell = screenshot.crop((left - origin_x, top - origin_y,
                                 right - origin_x, bottom - origin_y))
         has_email = email_cell_contains_text(cell)
@@ -96,13 +115,27 @@ def select_blank_contact_row(last_name_label, screen_region=None):
               + ("Email contains visible text." if has_email else "Email is visually blank."))
         if not has_email:
             blank_rows.append((number, row_y))
+            blank_details.append((number, row_y, top, bottom))
 
     if not blank_rows:
         raise pyautogui.ImageNotFoundException("No Contact row with a blank email was found.")
     if len(blank_rows) > 1:
-        raise pyautogui.ImageNotFoundException(
-            f"Multiple Contact rows with blank emails were found ({len(blank_rows)}). Refusing to guess.")
-    number, row_y = blank_rows[0]
+        if not first_name or not last_name:
+            raise pyautogui.ImageNotFoundException(
+                f"Multiple Contact rows with blank emails were found ({len(blank_rows)}). Refusing to guess.")
+        try:
+            number, row_y = choose_exact_blank_row(
+                screenshot, origin_x, origin_y, screen_region,
+                last_name_label, email_heading, blank_details,
+                first_name, last_name,
+            )
+        except ValueError as error:
+            raise pyautogui.ImageNotFoundException(
+                f"Multiple Contact rows with blank emails were found ({len(blank_rows)}). "
+                f"{error} Refusing to guess."
+            ) from error
+    else:
+        number, row_y = blank_rows[0]
     last_name_x = last_name_label.left + last_name_label.width // 2
     print(f"Selected blank Contact row {number}: Last Name link at x={last_name_x}, y={row_y}.")
     return last_name_x, row_y
@@ -150,19 +183,33 @@ def process_contact(first_name, last_name, email, screen_region=None):
     time.sleep(6)
 
     print("Looking for the last-name search area...")
-    area = locate_control(
-        "last_name_area.png",
+    search_label = locate_control(
+        "last_name_label.png",
         region=screen_region,
         confidence=0.75,
+        grayscale=True,
     )
-
-    if area is None:
+    if search_label is None:
         raise pyautogui.ImageNotFoundException(
             "Last Name label was not found."
         )
-
-    x = area.left + area.width // 2
-    y = area.top + area.height + 42
+    all_matches = locate_controls(
+        "all.png", region=screen_region,
+        confidence=0.80, grayscale=True,
+    )
+    filter_row_matches = [
+        box for box in all_matches
+        if box.left > search_label.left + search_label.width
+        and search_label.top < box.top + box.height // 2
+        < search_label.top + 6 * search_label.height
+    ]
+    if not filter_row_matches:
+        raise pyautogui.ImageNotFoundException(
+            "No <All> dropdown was found in the Last Name filter row."
+        )
+    dropdown = min(filter_row_matches, key=lambda box: box.left)
+    x = search_label.left + search_label.width // 2
+    y = dropdown.top + dropdown.height // 2
 
     pyautogui.moveTo(x, y, duration=0.5)
     pyautogui.click()
@@ -192,7 +239,9 @@ def process_contact(first_name, last_name, email, screen_region=None):
             "Last Name column label was not found."
         )
     print("Checking Contact rows for a blank Email cell...")
-    last_name_x, contact_y = select_blank_contact_row(last_name_label, screen_region)
+    last_name_x, contact_y = select_blank_contact_row(
+        last_name_label, screen_region, first_name, last_name,
+    )
 
     # Same column as Last Name, same row as Contact.
     print("Contact row found; opening it and entering the email...")

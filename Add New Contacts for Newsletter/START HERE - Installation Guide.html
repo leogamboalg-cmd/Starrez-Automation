@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install Add New Contacts for Newsletter</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --navy: #172033;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --green: #15803d;
+      --green-soft: #ecfdf3;
+      --orange: #b45309;
+      --orange-soft: #fff7ed;
+      --border: #dbe4f0;
+      --muted: #596579;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f4f7fb;
+      color: var(--navy);
+      font: 16px/1.55 "Segoe UI", Arial, sans-serif;
+    }
+    main {
+      width: min(820px, calc(100% - 32px));
+      margin: 40px auto;
+    }
+    header, section {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(23, 32, 51, 0.06);
+    }
+    header {
+      padding: 34px;
+      border-top: 6px solid var(--blue);
+    }
+    h1 { margin: 0 0 8px; font-size: 30px; line-height: 1.2; }
+    h2 { margin: 0 0 18px; font-size: 21px; }
+    p { margin: 8px 0; }
+    .subtitle { color: var(--muted); font-size: 17px; }
+    section { margin-top: 20px; padding: 28px; }
+    .step {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 14px;
+      padding: 17px 0;
+      border-top: 1px solid #edf1f6;
+    }
+    .step:first-of-type { border-top: 0; padding-top: 0; }
+    .number {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: white;
+      font-weight: 700;
+    }
+    .step-title { font-size: 17px; font-weight: 700; }
+    .file {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: #eef2f7;
+      font-weight: 700;
+    }
+    .callout {
+      margin-top: 18px;
+      padding: 16px 18px;
+      border-radius: 10px;
+      border-left: 5px solid;
+    }
+    .important { background: var(--orange-soft); border-color: var(--orange); }
+    .success { background: var(--green-soft); border-color: var(--green); }
+    ul { margin: 10px 0 0; padding-left: 22px; }
+    li { margin: 7px 0; }
+    footer { padding: 20px 4px; color: var(--muted); text-align: center; font-size: 14px; }
+    @media (max-width: 560px) {
+      main { margin: 16px auto; }
+      header, section { padding: 21px; border-radius: 12px; }
+      h1 { font-size: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Add New Contacts for Newsletter</h1>
+      <p class="subtitle">Installation and first-run guide</p>
+    </header>
+
+    <section>
+      <h2>Install the application</h2>
+
+      <div class="step">
+        <div class="number">1</div>
+        <div>
+          <div class="step-title">Extract the downloaded ZIP</div>
+          <p>Open the ZIP and extract all its files into a regular folder before installing.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="number">2</div>
+        <div>
+          <div class="step-title">Run the installer</div>
+          <p>Double-click <span class="file">Install Newsletter App.cmd</span>. It will bring up a terminal window.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="number">3</div>
+        <div>
+          <div class="step-title">Select the shared responses file</div>
+          <p>A File Explorer window will appear. Navigate to the <strong>UHS Newsletter Responses</strong> file you downloaded into your OneDrive folder. The app remembers this location for your Windows account.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="number">4</div>
+        <div>
+          <div class="step-title">Open the app</div>
+          <p>Double-click the new <strong>Add New Contacts for Newsletter</strong> app on your Home Desktop.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Running the Automation App</h2>
+
+      <div class="step">
+        <div class="number">1</div>
+        <div>
+          <div class="step-title">Prepare StarRez</div>
+          <p>Log into StarRez with <strong>Admin privileges</strong> and open the <strong>Main</strong> page.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="number">2</div>
+        <div>
+          <div class="step-title">Confirm the contact source</div>
+          <p>The shared responses CSV is selected by default. Use <strong>Choose file</strong> for a different CSV or Excel workbook, or <strong>Use shared responses</strong> to switch back.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="number">3</div>
+        <div>
+          <div class="step-title">Start the automation</div>
+          <p>Follow the instructions displayed in the app, then click the green <strong>START</strong> button.</p>
+        </div>
+      </div>
+
+      <div class="callout success">
+        <strong>Finished responses are remembered.</strong> A response is marked complete only after its StarRez automation succeeds. Failed, skipped, or cancelled responses remain pending.
+      </div>
+    </section>
+
+    <section>
+      <h2>Notifications</h2>
+      <ul>
+        <li>Windows checks the installer-selected shared responses CSV <strong>once per hour</strong>.</li>
+        <li>New pending responses trigger a Windows desktop notification.</li>
+        <li>The pending notification clears after all new responses are processed successfully.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Uninstall</h2>
+      <p>To remove the desktop app and its hourly scheduled check, double-click <span class="file">Uninstall Newsletter App.cmd</span>.</p>
+    </section>
+
+    <footer>This guide works offline and may be reopened at any time.</footer>
+  </main>
+</body>
+</html>

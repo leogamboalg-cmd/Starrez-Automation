@@ -3,3 +3,5 @@ dist/
 .venv/
 __pycache__/
 *.py[cod]
+tests/.ocr_deps/
+tests/.ocr_deps_streams/
