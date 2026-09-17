@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\leoga\OneDrive\Desktop\PythonProjects\Starrez\.venv
+set VIRTUAL_ENV=C:\Users\sarahhuynh\Starrez-Automation\.venv
 
 if not defined PROMPT set PROMPT=$P$G
 
